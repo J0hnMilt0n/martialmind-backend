@@ -28,11 +28,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize AI components
-pose_estimator = PoseEstimator()
-performance_scorer = PerformanceScorer()
-injury_detector = InjuryDetector()
-video_processor = VideoProcessor()
+# Lazy initialization of AI components
+_pose_estimator = None
+_performance_scorer = None
+_injury_detector = None
+_video_processor = None
+
+
+def get_pose_estimator() -> PoseEstimator:
+    """Lazy initialization of PoseEstimator"""
+    global _pose_estimator
+    if _pose_estimator is None:
+        _pose_estimator = PoseEstimator()
+    return _pose_estimator
+
+
+def get_performance_scorer() -> PerformanceScorer:
+    """Lazy initialization of PerformanceScorer"""
+    global _performance_scorer
+    if _performance_scorer is None:
+        _performance_scorer = PerformanceScorer()
+    return _performance_scorer
+
+
+def get_injury_detector() -> InjuryDetector:
+    """Lazy initialization of InjuryDetector"""
+    global _injury_detector
+    if _injury_detector is None:
+        _injury_detector = InjuryDetector()
+    return _injury_detector
+
+
+def get_video_processor() -> VideoProcessor:
+    """Lazy initialization of VideoProcessor"""
+    global _video_processor
+    if _video_processor is None:
+        _video_processor = VideoProcessor()
+    return _video_processor
 
 # Configuration
 MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100MB
@@ -98,6 +130,12 @@ async def analyze_video(video: UploadFile = File(...)):
         
         # Process video
         print(f"Processing video: {video.filename}")
+        
+        # Get AI components (lazy initialization)
+        pose_estimator = get_pose_estimator()
+        performance_scorer = get_performance_scorer()
+        injury_detector = get_injury_detector()
+        video_processor = get_video_processor()
         
         # Extract frames and poses
         frames, poses = video_processor.extract_poses(temp_file_path, pose_estimator)
