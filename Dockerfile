@@ -1,21 +1,6 @@
-# Multi-stage Dockerfile for MartialMind AI Backend - Optimized for size
+# Optimized Dockerfile for MartialMind AI Backend
+# Focused on minimizing image size for Cloud Run (4GB limit)
 
-# Stage 1: Build stage
-FROM python:3.9-slim as builder
-
-WORKDIR /app
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
-
-# Stage 2: Runtime stage - using smaller image
 FROM python:3.9-slim
 
 LABEL maintainer="Dojo Republic"
@@ -23,7 +8,7 @@ LABEL description="MartialMind AI - Performance Analysis and Injury Risk Detecti
 
 WORKDIR /app
 
-# Install only runtime dependencies
+# Install only essential runtime dependencies
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libsm6 \
@@ -32,17 +17,25 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     libgl1 \
     && apt-get clean \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /var/cache/apt/archives/*
+    && rm -rf /var/cache/apt/archives/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/*
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
+# Copy only requirements first for better caching
+COPY requirements.txt .
 
-# Ensure Python can find the packages
-ENV PATH=/root/.local/bin:$PATH \
-    PYTHONPATH=/root/.local/lib/python3.9/site-packages
+# Install Python dependencies with optimizations
+RUN pip install --no-cache-dir \
+    --compile \
+    --no-clean \
+    -r requirements.txt \
+    && pip cache purge \
+    && rm -rf /root/.cache/pip \
+    && rm -rf /tmp/*
 
-# Copy application code
+# Copy application code (after .dockerignore is applied)
 COPY . .
 
 # Create directory for temporary files
@@ -51,9 +44,9 @@ RUN mkdir -p /tmp/uploads
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# Health check with longer start period for MediaPipe initialization
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
 
-# Run application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Run application with minimal workers to reduce memory
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
