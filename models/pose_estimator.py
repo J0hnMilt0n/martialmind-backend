@@ -1,15 +1,17 @@
 import numpy as np
 import cv2
-import mediapipe as mp
 from typing import List, Tuple, Optional
 from config import settings
+
+# Import MediaPipe Pose - use direct import to avoid module resolution issues
+from mediapipe.python.solutions import pose as _pose
 
 
 class PoseEstimator:
     """
     Pose estimation using MediaPipe Pose.
     Extracts 33 body landmarks from video frames.
-    More robust than MoveNet but slightly larger footprint.
+    More robust than MoveNet and doesn't require external model downloads.
     """
     
     # MediaPipe landmark names (33 keypoints)
@@ -24,8 +26,8 @@ class PoseEstimator:
     ]
     
     def __init__(self):
-        # Initialize MediaPipe Pose
-        self.pose = mp.solutions.pose.Pose(
+        # Initialize MediaPipe Pose using direct submodule import
+        self.pose = _pose.Pose(
             static_image_mode=False,
             model_complexity=1,
             smooth_landmarks=True,
