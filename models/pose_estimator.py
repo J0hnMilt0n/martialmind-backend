@@ -14,9 +14,18 @@ class PoseEstimator:
     Much smaller footprint than MediaPipe (~50MB vs ~500MB).
     """
     
-    # MoveNet model URL
-    MODEL_URL = "https://tfhub.dev/tensorflow/lite-model/movenet/singlepose/lightning/tflite/float16/4?lite-format=tflite"
+    # MoveNet model URL - using direct download link to get actual TFLite file
+    # The tfhub.dev URL returns HTML, so we use direct file URLs
+    MODEL_URL = "https://storage.googleapis.com/download.tensorflow.org/models/tflite/posenet/movenet_singlepose_lightning_ptq_v5_128x128_float16_1.tflite"
     MODEL_PATH = "/tmp/movenet_lightning_f16.tflite"
+    
+    # Fallback URLs if the primary fails (different input sizes but compatible)
+    FALLBACK_MODEL_URLS = [
+        # 192x192 version
+        "https://storage.googleapis.com/download.tensorflow.org/models/tflite/posenet/movenet_singlepose_lightning_ptq_v5_192x192_float16_1.tflite",
+        # 256x256 version  
+        "https://storage.googleapis.com/download.tensorflow.org/models/tflite/posenet/movenet_singlepose_lightning_ptq_v5_256x256_float16_1.tflite",
+    ]
     
     # MoveNet landmark names (17 keypoints)
     LANDMARK_NAMES = [
@@ -44,10 +53,34 @@ class PoseEstimator:
         self.input_width = self.input_details[0]['shape'][2]
     
     def _download_model(self):
-        """Download MoveNet model from TensorFlow Hub"""
+        """Download MoveNet model from a reliable source"""
         print(f"Downloading MoveNet model to {self.MODEL_PATH}...")
-        urllib.request.urlretrieve(self.MODEL_URL, self.MODEL_PATH)
-        print("MoveNet model downloaded successfully")
+        
+        # Try primary URL first, then fallbacks
+        urls_to_try = [self.MODEL_URL] + self.FALLBACK_MODEL_URLS
+        
+        for url in urls_to_try:
+            try:
+                print(f"  Trying: {url}")
+                urllib.request.urlretrieve(url, self.MODEL_PATH)
+                
+                # Verify the downloaded file is a valid TFLite model
+                with open(self.MODEL_PATH, 'rb') as f:
+                    magic = f.read(4)
+                    if magic == b'TFL3':
+                        print("MoveNet model downloaded successfully")
+                        return
+                    else:
+                        print(f"  Invalid model file (magic bytes: {magic}), trying next URL...")
+                        continue
+            except Exception as e:
+                print(f"  Failed to download from {url}: {e}")
+                continue
+        
+        raise RuntimeError(
+            "Failed to download MoveNet model from all sources. "
+            "Please ensure the model file is available or check network connectivity."
+        )
     
     def estimate_pose(self, frame: np.ndarray) -> Optional[dict]:
         """
