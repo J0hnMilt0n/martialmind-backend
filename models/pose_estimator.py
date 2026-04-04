@@ -1,4 +1,4 @@
-import mediapipe_solutions as mp
+import mediapipe as mp
 import cv2
 import numpy as np
 from typing import List, Tuple, Optional
@@ -12,8 +12,8 @@ class PoseEstimator:
     """
     
     def __init__(self):
-        self.mp_pose = mp.pose
-        self.mp_drawing = mp.drawing_utils
+        self.mp_pose = mp.solutions.pose
+        self.mp_drawing = mp.solutions.drawing_utils
         
         # Initialize pose estimator with configuration
         self.pose = self.mp_pose.Pose(
