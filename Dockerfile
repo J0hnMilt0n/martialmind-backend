@@ -1,5 +1,5 @@
-# Ultra-lightweight Dockerfile for MartialMind AI Backend
-# Uses MoveNet (TensorFlow Lite) instead of MediaPipe for ~10x smaller size
+# Dockerfile for MartialMind AI Backend
+# Uses MediaPipe Pose for robust pose estimation (no external model downloads needed)
 
 FROM python:3.9-slim
 
