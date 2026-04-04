@@ -76,18 +76,32 @@ def calculate_center_of_mass(landmarks: List[dict]) -> Optional[Tuple[float, flo
         return None
     
     # Use hip and shoulder landmarks for COM estimation
-    # Indices: 11=left_shoulder, 12=right_shoulder, 23=left_hip, 24=right_hip
+    # Our landmark indices: 2=right_shoulder, 5=left_shoulder, 8=right_hip, 11=left_hip
     try:
-        left_shoulder = landmarks[11]
-        right_shoulder = landmarks[12]
-        left_hip = landmarks[23]
-        right_hip = landmarks[24]
+        # Try to use available landmarks
+        shoulder_points = []
+        hip_points = []
+        
+        # Check for shoulders (indices 2 and 5)
+        if 2 < len(landmarks):
+            shoulder_points.append(landmarks[2])
+        if 5 < len(landmarks):
+            shoulder_points.append(landmarks[5])
+        
+        # Check for hips (indices 8 and 11)
+        if 8 < len(landmarks):
+            hip_points.append(landmarks[8])
+        if 11 < len(landmarks):
+            hip_points.append(landmarks[11])
+        
+        all_points = shoulder_points + hip_points
+        
+        if len(all_points) < 2:
+            return None
         
         # Average of key points
-        com_x = (left_shoulder['x'] + right_shoulder['x'] + 
-                 left_hip['x'] + right_hip['x']) / 4
-        com_y = (left_shoulder['y'] + right_shoulder['y'] + 
-                 left_hip['y'] + right_hip['y']) / 4
+        com_x = sum(p['x'] for p in all_points) / len(all_points)
+        com_y = sum(p['y'] for p in all_points) / len(all_points)
         
         return (com_x, com_y)
     except (IndexError, KeyError):
@@ -155,14 +169,15 @@ def normalize_landmarks(landmarks: List[dict],
     Returns:
         Normalized landmarks
     """
-    if not landmarks or len(landmarks) < 24:
+    if not landmarks or len(landmarks) < 6:
         return landmarks
     
     # Use shoulder width as reference distance if not provided
     if reference_distance is None:
         try:
-            left_shoulder = landmarks[11]
-            right_shoulder = landmarks[12]
+            # Our landmark indices: 2=right_shoulder, 5=left_shoulder
+            right_shoulder = landmarks[2]
+            left_shoulder = landmarks[5]
             reference_distance = calculate_distance(
                 (left_shoulder['x'], left_shoulder['y']),
                 (right_shoulder['x'], right_shoulder['y'])
