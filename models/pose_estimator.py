@@ -3,8 +3,28 @@ import cv2
 from typing import List, Tuple, Optional
 from config import settings
 
-# Import MediaPipe Pose - use direct import to avoid module resolution issues
-from mediapipe.python.solutions import pose as _pose
+# Import MediaPipe Pose with fallback for different versions
+def _import_pose():
+    """Import MediaPipe Pose with fallbacks for different versions."""
+    # Try different import paths for different mediapipe versions
+    import_paths = [
+        ('mediapipe.solutions', 'pose'),           # Standard path (most versions)
+        ('mediapipe.python.solutions', 'pose'),    # Alternative path (some versions)
+    ]
+    
+    for module_path, name in import_paths:
+        try:
+            module = __import__(module_path, fromlist=[name])
+            return getattr(module, name)
+        except (ImportError, AttributeError):
+            continue
+    
+    raise ImportError(
+        "Could not import MediaPipe Pose. Please ensure mediapipe>=0.10.14 is installed."
+    )
+
+# Get the Pose class
+_pose = _import_pose()
 
 
 class PoseEstimator:
