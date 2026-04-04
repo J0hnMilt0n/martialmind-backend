@@ -1,28 +1,53 @@
-import mediapipe as mp
-import cv2
 import numpy as np
+import cv2
+import urllib.request
+import os
+import tflite_runtime.interpreter as tflite
 from typing import List, Tuple, Optional
 from config import settings
 
 
 class PoseEstimator:
     """
-    Wrapper for MediaPipe Pose estimation.
-    Extracts 33 body landmarks from video frames.
+    Lightweight pose estimation using MoveNet via TensorFlow Lite.
+    Extracts 17 body landmarks from video frames.
+    Much smaller footprint than MediaPipe (~50MB vs ~500MB).
     """
     
+    # MoveNet model URL
+    MODEL_URL = "https://tfhub.dev/tensorflow/lite-model/movenet/singlepose/lightning/tflite/float16/4?lite-format=tflite"
+    MODEL_PATH = "/tmp/movenet_lightning_f16.tflite"
+    
+    # MoveNet landmark names (17 keypoints)
+    LANDMARK_NAMES = [
+        'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
+        'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
+        'left_wrist', 'right_wrist', 'left_hip', 'right_hip',
+        'left_knee', 'right_knee', 'left_ankle', 'right_ankle'
+    ]
+    
     def __init__(self):
-        self.mp_pose = mp.solutions.pose
-        self.mp_drawing = mp.solutions.drawing_utils
+        # Download model if not exists
+        if not os.path.exists(self.MODEL_PATH):
+            self._download_model()
         
-        # Initialize pose estimator with configuration
-        self.pose = self.mp_pose.Pose(
-            model_complexity=settings.POSE_MODEL_COMPLEXITY,
-            min_detection_confidence=settings.MIN_DETECTION_CONFIDENCE,
-            min_tracking_confidence=settings.MIN_TRACKING_CONFIDENCE,
-            enable_segmentation=False,
-            smooth_landmarks=True
-        )
+        # Initialize TensorFlow Lite interpreter
+        self.interpreter = tflite.Interpreter(model_path=self.MODEL_PATH)
+        self.interpreter.allocate_tensors()
+        
+        # Get input and output details
+        self.input_details = self.interpreter.get_input_details()
+        self.output_details = self.interpreter.get_output_details()
+        
+        # Get model input shape
+        self.input_height = self.input_details[0]['shape'][1]
+        self.input_width = self.input_details[0]['shape'][2]
+    
+    def _download_model(self):
+        """Download MoveNet model from TensorFlow Hub"""
+        print(f"Downloading MoveNet model to {self.MODEL_PATH}...")
+        urllib.request.urlretrieve(self.MODEL_URL, self.MODEL_PATH)
+        print("MoveNet model downloaded successfully")
     
     def estimate_pose(self, frame: np.ndarray) -> Optional[dict]:
         """
@@ -37,25 +62,47 @@ class PoseEstimator:
         # Convert BGR to RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Process frame
-        results = self.pose.process(frame_rgb)
+        # Resize and normalize input
+        input_frame = cv2.resize(frame_rgb, (self.input_width, self.input_height))
+        input_frame = input_frame.astype(np.float32) / 127.5 - 1.0
+        input_frame = np.expand_dims(input_frame, axis=0)
         
-        if not results.pose_landmarks:
+        # Run inference
+        self.interpreter.set_tensor(self.input_details[0]['index'], input_frame)
+        self.interpreter.invoke()
+        
+        # Get output
+        keypoints = self.interpreter.get_tensor(self.output_details[0]['index'])[0]
+        scores = self.interpreter.get_tensor(self.output_details[1]['index'])[0]
+        
+        # Filter keypoints by confidence threshold
+        confidence_threshold = settings.MIN_DETECTION_CONFIDENCE
+        landmarks = []
+        
+        for i, (keypoint, score) in enumerate(zip(keypoints, scores)):
+            if score >= confidence_threshold:
+                landmarks.append({
+                    'id': i,
+                    'name': self.LANDMARK_NAMES[i],
+                    'x': float(keypoint[1]),  # x coordinate (normalized)
+                    'y': float(keypoint[0]),  # y coordinate (normalized)
+                    'z': float(keypoint[2]),  # z coordinate (depth, less accurate in 2D)
+                    'visibility': float(score)
+                })
+        
+        if not landmarks:
             return None
         
-        # Extract landmarks
-        landmarks = []
-        for landmark in results.pose_landmarks.landmark:
-            landmarks.append({
-                'x': landmark.x,
-                'y': landmark.y,
-                'z': landmark.z,
-                'visibility': landmark.visibility
-            })
+        # Convert normalized coordinates to pixel coordinates
+        height, width = frame.shape[:2]
+        for landmark in landmarks:
+            landmark['x'] = landmark['x'] * width
+            landmark['y'] = landmark['y'] * height
         
         return {
             'landmarks': landmarks,
-            'world_landmarks': results.pose_world_landmarks
+            'scores': scores.tolist(),
+            'num_landmarks': len(landmarks)
         }
     
     def get_landmark(self, pose_data: dict, landmark_id: int) -> Optional[dict]:
@@ -64,7 +111,7 @@ class PoseEstimator:
         
         Args:
             pose_data: Pose data dictionary from estimate_pose()
-            landmark_id: MediaPipe landmark ID (0-32)
+            landmark_id: MoveNet landmark ID (0-16)
             
         Returns:
             Landmark dictionary or None
@@ -76,42 +123,27 @@ class PoseEstimator:
     
     def close(self):
         """Release resources"""
-        self.pose.close()
+        # TensorFlow Lite doesn't require explicit cleanup
+        pass
 
 
-# MediaPipe Pose Landmark IDs (for reference)
+# MoveNet Pose Landmark IDs (17 keypoints)
 POSE_LANDMARKS = {
     'NOSE': 0,
-    'LEFT_EYE_INNER': 1,
-    'LEFT_EYE': 2,
-    'LEFT_EYE_OUTER': 3,
-    'RIGHT_EYE_INNER': 4,
-    'RIGHT_EYE': 5,
-    'RIGHT_EYE_OUTER': 6,
-    'LEFT_EAR': 7,
-    'RIGHT_EAR': 8,
-    'MOUTH_LEFT': 9,
-    'MOUTH_RIGHT': 10,
-    'LEFT_SHOULDER': 11,
-    'RIGHT_SHOULDER': 12,
-    'LEFT_ELBOW': 13,
-    'RIGHT_ELBOW': 14,
-    'LEFT_WRIST': 15,
-    'RIGHT_WRIST': 16,
-    'LEFT_PINKY': 17,
-    'RIGHT_PINKY': 18,
-    'LEFT_INDEX': 19,
-    'RIGHT_INDEX': 20,
-    'LEFT_THUMB': 21,
-    'RIGHT_THUMB': 22,
-    'LEFT_HIP': 23,
-    'RIGHT_HIP': 24,
-    'LEFT_KNEE': 25,
-    'RIGHT_KNEE': 26,
-    'LEFT_ANKLE': 27,
-    'RIGHT_ANKLE': 28,
-    'LEFT_HEEL': 29,
-    'RIGHT_HEEL': 30,
-    'LEFT_FOOT_INDEX': 31,
-    'RIGHT_FOOT_INDEX': 32
+    'LEFT_EYE': 1,
+    'RIGHT_EYE': 2,
+    'LEFT_EAR': 3,
+    'RIGHT_EAR': 4,
+    'LEFT_SHOULDER': 5,
+    'RIGHT_SHOULDER': 6,
+    'LEFT_ELBOW': 7,
+    'RIGHT_ELBOW': 8,
+    'LEFT_WRIST': 9,
+    'RIGHT_WRIST': 10,
+    'LEFT_HIP': 11,
+    'RIGHT_HIP': 12,
+    'LEFT_KNEE': 13,
+    'RIGHT_KNEE': 14,
+    'LEFT_ANKLE': 15,
+    'RIGHT_ANKLE': 16
 }
