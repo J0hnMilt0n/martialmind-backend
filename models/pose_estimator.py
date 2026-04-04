@@ -25,8 +25,7 @@ class PoseEstimator:
     
     def __init__(self):
         # Initialize MediaPipe Pose
-        self.mp_pose = mp.solutions.pose
-        self.pose = self.mp_pose.Pose(
+        self.pose = mp.solutions.pose.Pose(
             static_image_mode=False,
             model_complexity=1,
             smooth_landmarks=True,
