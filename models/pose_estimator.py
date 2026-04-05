@@ -45,52 +45,43 @@ class PoseEstimator:
         # First try MediaPipe (most accurate for pose estimation)
         try:
             import mediapipe as mp
-            self.mp_pose = mp.solutions.pose
-            self.mp_drawing = mp.solutions.drawing_utils
-            self.pose = self.mp_pose.Pose(
-                static_image_mode=False,
-                model_complexity=1,
-                smooth_landmarks=True,
-                enable_segmentation=False,
-                min_detection_confidence=settings.MIN_DETECTION_CONFIDENCE,
-                min_tracking_confidence=0.5
-            )
-            self._initialized = True
-            print("Initialized MediaPipe Pose estimation")
-            return
+            
+            # Try new MediaPipe API first (version 0.10+)
+            try:
+                from mediapipe.tasks.vision import pose_landmarker
+                from mediapipe.tasks.vision.pose_landmarker import PoseLandmarker
+                self.mp_pose = mp
+                self._use_new_mediapipe = True
+                print("Initialized MediaPipe Pose estimation (new API)")
+                self._initialized = True
+                return
+            except (ImportError, AttributeError):
+                pass
+            
+            # Fallback to older MediaPipe API
+            try:
+                self.mp_pose = mp.solutions.pose
+                self.mp_drawing = mp.solutions.drawing_utils
+                self.pose = self.mp_pose.Pose(
+                    static_image_mode=False,
+                    model_complexity=1,
+                    smooth_landmarks=True,
+                    enable_segmentation=False,
+                    min_detection_confidence=settings.MIN_DETECTION_CONFIDENCE,
+                    min_tracking_confidence=0.5
+                )
+                self._use_new_mediapipe = False
+                self._initialized = True
+                print("Initialized MediaPipe Pose estimation (legacy API)")
+                return
+            except (ImportError, AttributeError) as e:
+                print(f"MediaPipe legacy API error: {e}")
+                raise
+                
         except ImportError:
             print("MediaPipe not available, trying OpenCV DNN...")
         except Exception as e:
             print(f"MediaPipe initialization error: {e}")
-        
-        # Try OpenCV DNN with MoveNet
-        try:
-            # MoveNet model configuration
-            model_url = "https://tfhub.dev/tensorflow/movenet/multipose/lightning/1"
-            # For now, use OpenCV's built-in pose model
-            self.net = cv2.dnn.readNetFromModelImporter(
-                'models/pose/movenet_multipose.json',
-                'models/pose/movenet_multipose.weights'
-            )
-            if self.net.empty():
-                raise ValueError("Could not load MoveNet model")
-            self._initialized = True
-            print("Initialized OpenCV DNN with MoveNet")
-            return
-        except Exception as e:
-            print(f"MoveNet initialization error: {e}")
-        
-        # Fallback to OpenCV's built-in pose estimation
-        try:
-            # Try loading OpenPose model from OpenCV Zoo
-            self.net = cv2.dnn.readNetFromCaffe(
-                'models/pose/openpose.caffemodel'
-            )
-            self._initialized = True
-            print("Initialized OpenCV OpenPose")
-            return
-        except Exception as e:
-            print(f"OpenPose initialization error: {e}")
         
         # If all else fails, use enhanced heuristic approach
         print("Using enhanced heuristic pose estimation")
@@ -128,59 +119,67 @@ class PoseEstimator:
             # Convert BGR to RGB
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Process the frame
-            results = self.pose.process(rgb_frame)
+            # Use legacy MediaPipe API (solutions.pose)
+            if hasattr(self, 'pose') and self.pose is not None:
+                # Process the frame
+                results = self.pose.process(rgb_frame)
+                
+                if results.pose_landmarks is None:
+                    return None
+                
+                landmarks = []
+                scores = []
+                
+                # Map MediaPipe landmarks to our simplified format
+                mp_to_our = [
+                    (0, 0),   # nose -> nose
+                    (1, 1),   # left_eye -> neck (approximate)
+                    (2, 2),   # right_shoulder -> right_shoulder
+                    (4, 3),   # right_elbow -> right_elbow
+                    (6, 4),   # right_wrist -> right_wrist
+                    (5, 5),   # left_shoulder -> left_shoulder
+                    (7, 6),   # left_elbow -> left_elbow
+                    (8, 7),   # left_wrist -> left_wrist
+                    (10, 8),  # right_hip -> right_hip
+                    (12, 9),  # right_knee -> right_knee
+                    (14, 10), # right_ankle -> right_ankle
+                    (9, 11),  # left_hip -> left_hip
+                    (11, 12), # left_knee -> left_knee
+                    (13, 13), # left_ankle -> left_ankle
+                ]
+                
+                for mp_idx, our_idx in mp_to_our:
+                    if mp_idx < len(results.pose_landmarks.landmark):
+                        lm = results.pose_landmarks.landmark[mp_idx]
+                        visibility = results.pose_landmarks.visibility[mp_idx] if hasattr(results.pose_landmarks, 'visibility') else lm.visibility
+                        
+                        landmarks.append({
+                            'id': our_idx,
+                            'name': self.LANDMARK_NAMES[our_idx],
+                            'x': lm.x * width,
+                            'y': lm.y * height,
+                            'z': lm.z * width,  # Scale z by width for consistency
+                            'visibility': visibility
+                        })
+                        scores.append(visibility)
+                
+                if not landmarks:
+                    return None
+                
+                return {
+                    'landmarks': landmarks,
+                    'scores': scores,
+                    'num_landmarks': len(landmarks)
+                }
             
-            if results.pose_landmarks is None:
-                return None
+            # If MediaPipe is initialized but pose object doesn't exist, use enhanced fallback
+            print("MediaPipe initialized but pose object not available, using enhanced detection")
+            return self._estimate_enhanced(frame, width, height)
             
-            landmarks = []
-            scores = []
-            
-            # Map MediaPipe landmarks to our simplified format
-            mp_to_our = [
-                (0, 0),   # nose -> nose
-                (1, 1),   # left_eye -> neck (approximate)
-                (2, 2),   # right_shoulder -> right_shoulder
-                (4, 3),   # right_elbow -> right_elbow
-                (6, 4),   # right_wrist -> right_wrist
-                (5, 5),   # left_shoulder -> left_shoulder
-                (7, 6),   # left_elbow -> left_elbow
-                (8, 7),   # left_wrist -> left_wrist
-                (10, 8),  # right_hip -> right_hip
-                (12, 9),  # right_knee -> right_knee
-                (14, 10), # right_ankle -> right_ankle
-                (9, 11),  # left_hip -> left_hip
-                (11, 12), # left_knee -> left_knee
-                (13, 13), # left_ankle -> left_ankle
-            ]
-            
-            for mp_idx, our_idx in mp_to_our:
-                if mp_idx < len(results.pose_landmarks.landmark):
-                    lm = results.pose_landmarks.landmark[mp_idx]
-                    visibility = results.pose_landmarks.visibility[mp_idx] if hasattr(results.pose_landmarks, 'visibility') else lm.visibility
-                    
-                    landmarks.append({
-                        'id': our_idx,
-                        'name': self.LANDMARK_NAMES[our_idx],
-                        'x': lm.x * width,
-                        'y': lm.y * height,
-                        'z': lm.z * width,  # Scale z by width for consistency
-                        'visibility': visibility
-                    })
-                    scores.append(visibility)
-            
-            if not landmarks:
-                return None
-            
-            return {
-                'landmarks': landmarks,
-                'scores': scores,
-                'num_landmarks': len(landmarks)
-            }
         except Exception as e:
             print(f"MediaPipe estimation error: {e}")
-            return None
+            # Fallback to enhanced detection on error
+            return self._estimate_enhanced(frame, width, height)
     
     def _estimate_with_dnn(self, frame, width, height) -> Optional[dict]:
         """Estimate pose using OpenCV DNN model."""

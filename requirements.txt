@@ -8,4 +8,4 @@ pydantic-settings
 python-dotenv
 aiofiles
 scipy
-mediapipe
+mediapipe>=0.10.0,<0.11.0
