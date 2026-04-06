@@ -341,9 +341,26 @@ class PoseEstimator:
             self._prev_frame = frame.copy()
             return 0, 0
         
+        # Check if previous frame has the same size as current frame
+        # If not, reset to avoid dimension mismatch errors
+        if (hasattr(self, '_prev_frame_shape') and 
+            self._prev_frame_shape != frame.shape[:2]):
+            self._prev_frame = frame.copy()
+            self._prev_frame_shape = frame.shape[:2]
+            return 0, 0
+        
+        # Store current frame shape for next iteration
+        self._prev_frame_shape = frame.shape[:2]
+        
         # Calculate frame difference
         prev_gray = cv2.cvtColor(self._prev_frame, cv2.COLOR_BGR2GRAY)
         curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Ensure both grayscale images have the same size
+        if prev_gray.shape != curr_gray.shape:
+            # Resize prev_gray to match curr_gray if there's a mismatch
+            prev_gray = cv2.resize(prev_gray, (curr_gray.shape[1], curr_gray.shape[0]))
+        
         diff = cv2.absdiff(prev_gray, curr_gray)
         
         # Focus on the person's region
@@ -440,8 +457,17 @@ class PoseEstimator:
         
         return pose_data['landmarks'][landmark_id]
     
+    def reset(self):
+        """Reset state between video processing sessions."""
+        if hasattr(self, '_prev_frame'):
+            del self._prev_frame
+        if hasattr(self, '_prev_frame_shape'):
+            del self._prev_frame_shape
+        PoseEstimator._frame_counter = 0
+    
     def close(self):
         """Release resources"""
+        self.reset()
         if self.net is not None:
             self.net.release()
         if hasattr(self, 'pose') and self.pose is not None:

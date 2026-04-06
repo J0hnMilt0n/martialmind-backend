@@ -137,6 +137,9 @@ async def analyze_video(video: UploadFile = File(...)):
         injury_detector = get_injury_detector()
         video_processor = get_video_processor()
         
+        # Reset pose estimator state for new video (clears previous frame cache)
+        pose_estimator.reset()
+        
         # Extract frames and poses
         frames, poses = video_processor.extract_poses(temp_file_path, pose_estimator)
         
